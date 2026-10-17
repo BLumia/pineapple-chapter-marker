@@ -113,13 +113,16 @@ std::optional<qint64> parseTimestamp(const QString& raw)
 TimestampParseResult parseTimestampText(const QString& text)
 {
     // Line structure: [bullet] [opening bracket] timestamp [closing bracket] [separator decoration] title
+    // All \x{...} are PCRE2 unicode escapes and therefore double-escaped at the
+    // C++ level; a single backslash would be a C++23 delimited escape (MSVC
+    // rejects it, and GCC never produced the intended characters either).
     static const QRegularExpression lineRe(QStringLiteral(
         "^\\s*"
-        "(?:[-\x{2013}\x{2014}*\x{2022}\x{00b7}>\\x{2192}]+\\s*)?"
-        "[\\[\\(\x{ff08}\x{3010}]?\\s*"
+        "(?:[-\\x{2013}\\x{2014}*\\x{2022}\\x{00b7}>\\x{2192}]+\\s*)?"
+        "[\\[\\(\\x{ff08}\\x{3010}]?\\s*"
         "(?<stamp>\\d{1,3}:[0-5]?\\d(?::[0-5]?\\d)?(?:[.,]\\d{1,3})?)"
-        "\\s*[\\]\\)\x{ff09}\x{3011}]?\\s*"
-        "(?:[-\x{2013}\x{2014}:~>|\x{ff5e}.)\\]]+\\s*)?"
+        "\\s*[\\]\\)\\x{ff09}\\x{3011}]?\\s*"
+        "(?:[-\\x{2013}\\x{2014}:~>|\\x{ff5e}.)\\]]+\\s*)?"
         "(?<title>.*)$"));
 
     TimestampParseResult result;

@@ -6,6 +6,12 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
+if(MSVC)
+    # Source files and string literals are UTF-8 (…, ✓, ≠, ×); MSVC assumes
+    # the legacy ANSI codepage without this flag.
+    add_compile_options(/utf-8)
+endif()
+
 find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia MultimediaWidgets LinguistTools)
 
 # FFmpeg via the FindFFmpeg.cmake that ships with the Qt6 package.
@@ -90,3 +96,5 @@ target_link_libraries(save-test PRIVATE
     FFmpeg::avformat
     FFmpeg::avutil
 )
+
+install(TARGETS pineapple-chapter-marker RUNTIME DESTINATION bin)

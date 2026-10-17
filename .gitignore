@@ -1,6 +1,7 @@
 # Build
 build/
 build-*/
+install-*/
 out/
 
 # CMake
@@ -20,3 +21,6 @@ Makefile
 # System
 .DS_Store
 Thumbs.db
+
+# User Local Stuff
+*.local.ps1
