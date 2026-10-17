@@ -8,12 +8,12 @@ set(CMAKE_AUTOMOC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia MultimediaWidgets LinguistTools)
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
-    libavformat
-    libavcodec
-    libavutil
-)
+# FFmpeg via the FindFFmpeg.cmake that ships with the Qt6 package.
+# This must come after find_package(Qt6): Qt6Config prepends its cmake
+# directory to CMAKE_MODULE_PATH, which is where the module is found.
+# The module uses pkg-config only as an optional hint and otherwise
+# falls back to plain find_path/find_library (also honours FFMPEG_DIR).
+find_package(FFmpeg REQUIRED COMPONENTS AVCODEC AVFORMAT AVUTIL)
 
 qt_add_executable(pineapple-chapter-marker WIN32
     src/main.cpp
@@ -54,34 +54,13 @@ target_link_libraries(pineapple-chapter-marker PRIVATE
     Qt6::Widgets
     Qt6::Multimedia
     Qt6::MultimediaWidgets
-    PkgConfig::FFMPEG
+    FFmpeg::avcodec
+    FFmpeg::avformat
+    FFmpeg::avutil
 )
 
-# ---- i18n (English source copy; Chinese embedded via a .ts translation) ----
-set(PCM_TS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/translations/pineapple-chapter-marker_zh_CN.ts")
-set(PCM_QM_FILE "${CMAKE_CURRENT_BINARY_DIR}/pineapple-chapter-marker_zh_CN.qm")
-
-set_source_files_properties("${PCM_QM_FILE}" PROPERTIES
-    QT_RESOURCE_ALIAS "pineapple-chapter-marker_zh_CN.qm")
-
-add_custom_command(
-    OUTPUT "${PCM_QM_FILE}"
-    COMMAND Qt6::lrelease -silent "${PCM_TS_FILE}" -qm "${PCM_QM_FILE}"
-    DEPENDS "${PCM_TS_FILE}"
-    COMMENT "lrelease zh_CN translation"
-    VERBATIM
-)
-qt_add_resources(pineapple-chapter-marker "pcm_translations"
-    PREFIX "/i18n"
-    FILES "${PCM_QM_FILE}"
-)
-
-# Refresh translation sources manually: cmake --build build --target update_translations
-add_custom_target(update_translations
-    COMMAND Qt6::lupdate -no-obsolete src -ts "${PCM_TS_FILE}"
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    COMMENT "lupdate: refresh TS file"
-    VERBATIM
+qt_add_translations(pineapple-chapter-marker
+    TS_FILES translations/pineapple-chapter-marker_zh_CN.ts
 )
 
 # CLI self-check tool: prints a file's format/streams/chapters for headless regression checks
@@ -93,7 +72,9 @@ qt_add_executable(probe-test
 target_include_directories(probe-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(probe-test PRIVATE
     Qt6::Core
-    PkgConfig::FFMPEG
+    FFmpeg::avcodec
+    FFmpeg::avformat
+    FFmpeg::avutil
 )
 
 # CLI self-check tool: end-to-end test of the save pipeline (remux + chapters + validation + replace)
@@ -105,5 +86,7 @@ qt_add_executable(save-test
 target_include_directories(save-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(save-test PRIVATE
     Qt6::Core
-    PkgConfig::FFMPEG
+    FFmpeg::avcodec
+    FFmpeg::avformat
+    FFmpeg::avutil
 )
