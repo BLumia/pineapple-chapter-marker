@@ -833,7 +833,9 @@ function Copy-VCRuntimeAppLocal {
     Copies KF6 translations (.mo, .qm), kf6_entry.desktop, project-specific
     translations, and Qt base translations to the specified directories.
 .PARAMETER Kf6LocaleDir
-    Source locale directory from kf6redist (e.g., "kf6redist-install/bin/data/locale")
+    Source locale directory from kf6redist (e.g., "kf6redist-install/bin/data/locale").
+    Optional: when empty, KF6 translations are skipped and only project/Qt
+    translations are processed.
 .PARAMETER DestinationDir
     Destination locale directory (e.g., "bin/data/locale" or "AppBundle/Contents/Resources/locale")
 .PARAMETER Locales
@@ -856,8 +858,7 @@ function Copy-VCRuntimeAppLocal {
 function Copy-Translations {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]
-        [string]$Kf6LocaleDir,
+        [string]$Kf6LocaleDir = "",
         [Parameter(Mandatory)]
         [string]$DestinationDir,
         [Parameter(Mandatory)]
@@ -870,32 +871,35 @@ function Copy-Translations {
     )
 
     foreach ($localeName in $Locales) {
-        $srcLocaleDir = Join-Path $Kf6LocaleDir $localeName
-        if (-not (Test-Path -Path $srcLocaleDir)) {
-            Write-Warning "Locale not found: $localeName"
-            continue
-        }
-
         $dstLocaleDir = Join-Path $DestinationDir $localeName
         $dstMessagesDir = Join-Path $dstLocaleDir "LC_MESSAGES"
-        if (-not (Test-Path -Path $dstMessagesDir)) {
-            New-Item -ItemType Directory -Path $dstMessagesDir -Force | Out-Null
-        }
 
-        # Copy KF6 .mo files
-        Get-ChildItem -Path "$srcLocaleDir/LC_MESSAGES" -Filter "*.mo" -ErrorAction SilentlyContinue | ForEach-Object {
-            Copy-Item -Path $_.FullName -Destination $dstMessagesDir -Force
-        }
+        # Copy KF6 translations (.mo / .qm / kf6_entry.desktop), when provided
+        if ($Kf6LocaleDir) {
+            $srcLocaleDir = Join-Path $Kf6LocaleDir $localeName
+            if (-not (Test-Path -Path $srcLocaleDir)) {
+                Write-Warning "Locale not found: $localeName"
+            } else {
+                if (-not (Test-Path -Path $dstMessagesDir)) {
+                    New-Item -ItemType Directory -Path $dstMessagesDir -Force | Out-Null
+                }
 
-        # Copy KF6 .qm files
-        Get-ChildItem -Path "$srcLocaleDir/LC_MESSAGES" -Filter "*.qm" -ErrorAction SilentlyContinue | ForEach-Object {
-            Copy-Item -Path $_.FullName -Destination $dstMessagesDir -Force
-        }
+                # Copy KF6 .mo files
+                Get-ChildItem -Path "$srcLocaleDir/LC_MESSAGES" -Filter "*.mo" -ErrorAction SilentlyContinue | ForEach-Object {
+                    Copy-Item -Path $_.FullName -Destination $dstMessagesDir -Force
+                }
 
-        # Copy kf6_entry.desktop
-        $desktopFile = Join-Path $srcLocaleDir "kf6_entry.desktop"
-        if (Test-Path -Path $desktopFile) {
-            Copy-Item -Path $desktopFile -Destination $dstLocaleDir -Force
+                # Copy KF6 .qm files
+                Get-ChildItem -Path "$srcLocaleDir/LC_MESSAGES" -Filter "*.qm" -ErrorAction SilentlyContinue | ForEach-Object {
+                    Copy-Item -Path $_.FullName -Destination $dstMessagesDir -Force
+                }
+
+                # Copy kf6_entry.desktop
+                $desktopFile = Join-Path $srcLocaleDir "kf6_entry.desktop"
+                if (Test-Path -Path $desktopFile) {
+                    Copy-Item -Path $desktopFile -Destination $dstLocaleDir -Force
+                }
+            }
         }
 
         # Copy project's own .mo file
@@ -903,6 +907,9 @@ function Copy-Translations {
             $projectMoRelPath = $ProjectMoPathPattern -replace '\{locale\}', $localeName
             $projectMoFile = Join-Path $BuildDir $projectMoRelPath
             if (Test-Path -Path $projectMoFile) {
+                if (-not (Test-Path -Path $dstMessagesDir)) {
+                    New-Item -ItemType Directory -Path $dstMessagesDir -Force | Out-Null
+                }
                 Copy-Item -Path $projectMoFile -Destination $dstMessagesDir -Force
                 Write-Host "  Copied: $(Split-Path -Leaf $projectMoFile) ($localeName)" -ForegroundColor Gray
             }
@@ -929,7 +936,7 @@ function Copy-Translations {
     Performs complete macOS deployment:
     1. Validates prerequisites (app bundle, kf6redist installation, main executable)
     2. Copies KF6 libraries with @rpath resolution
-    3. Copies KIconEnginePlugin, Breeze style, and optional extra KF plugins
+    3. Copies the KF6 integration plugins selected via KfPlugins
     4. Resolves plugin dependencies
     5. Copies translations (KF6 + project-specific)
     6. Runs macdeployqt for code signing
@@ -955,17 +962,19 @@ function Copy-Translations {
     VC++ Redistributable).
 .PARAMETER DmgName
     Name for the final DMG file (without extension). If not specified, uses app bundle name.
-.PARAMETER ExtraKfPlugins
-    Extra KF6 plugins (subdirectories of Kf6InstallDir/lib/plugins/kf6/) to deploy
-    into PlugIns/kf6/. KF6 loads these at runtime from <libraryPaths>/kf6/<name>/,
-    so they are never picked up by dependency scanning and must be copied explicitly.
-    Currently supported: 'sonnet' (spell check backends).
+.PARAMETER KfPlugins
+    KF6 integration plugins to ship, selected from: 'kiconthemes'
+    (KIconEnginePlugin for icon theming), 'breeze' (Breeze style) and 'sonnet'
+    (spell check backends, deployed into PlugIns/kf6/). Sonnet is loaded by KF6
+    at runtime from <libraryPaths>/kf6/<name>/, so it is never picked up by
+    dependency scanning and must be copied explicitly. Empty deploys none of
+    them.
 .EXAMPLE
     Deploy-MacOSAppBundle -AppBundle "build/MyApp.app" -BinaryName "myapp" `
         -BuildDir "build" -Kf6InstallDir $env:KF6REDIST_DIR `
         -Locales @("zh_CN") `
         -ProjectMoPathPattern "po/locale/{locale}/LC_MESSAGES/myapp.mo" `
-        -DmgName "my-application" -ExtraKfPlugins @("sonnet")
+        -DmgName "my-application" -KfPlugins @("kiconthemes", "breeze", "sonnet")
 #>
 function Deploy-MacOSAppBundle {
     [CmdletBinding()]
@@ -984,8 +993,8 @@ function Deploy-MacOSAppBundle {
         [string[]]$Locales,
         [string]$ProjectMoPathPattern,
         [string]$DmgName,
-        [ValidateSet('sonnet')]
-        [string[]]$ExtraKfPlugins = @()
+        [ValidateSet('kiconthemes', 'breeze', 'sonnet')]
+        [string[]]$KfPlugins = @()
     )
 
     # Validate prerequisites
@@ -1019,34 +1028,38 @@ function Deploy-MacOSAppBundle {
 
     $pluginsDir = Join-Path $AppBundle "Contents/PlugIns"
 
-    # Copy KIconEnginePlugin for icon theming
-    $iconEngineSrc = Join-Path $Kf6InstallDir "lib/plugins/kiconthemes6/iconengines/KIconEnginePlugin.so"
-    $iconEngineDst = Join-Path $pluginsDir "iconengines/KIconEnginePlugin.so"
-    if (Test-Path -Path $iconEngineSrc) {
-        $iconEngineDir = Join-Path $pluginsDir "iconengines"
-        if (-not (Test-Path -Path $iconEngineDir)) {
-            New-Item -ItemType Directory -Path $iconEngineDir -Force | Out-Null
+    # Copy KIconEnginePlugin for icon theming (opt-in via KfPlugins)
+    if ($KfPlugins -contains 'kiconthemes') {
+        $iconEngineSrc = Join-Path $Kf6InstallDir "lib/plugins/kiconthemes6/iconengines/KIconEnginePlugin.so"
+        $iconEngineDst = Join-Path $pluginsDir "iconengines/KIconEnginePlugin.so"
+        if (Test-Path -Path $iconEngineSrc) {
+            $iconEngineDir = Join-Path $pluginsDir "iconengines"
+            if (-not (Test-Path -Path $iconEngineDir)) {
+                New-Item -ItemType Directory -Path $iconEngineDir -Force | Out-Null
+            }
+            Copy-Item -Path $iconEngineSrc -Destination $iconEngineDst -Force
+            Write-Host "  Copied: KIconEnginePlugin.so" -ForegroundColor Gray
         }
-        Copy-Item -Path $iconEngineSrc -Destination $iconEngineDst -Force
-        Write-Host "  Copied: KIconEnginePlugin.so" -ForegroundColor Gray
     }
 
-    # Copy Breeze style
-    $breezeStyleSrc = Join-Path $Kf6InstallDir "lib/plugins/styles/breeze6.so"
-    $breezeStyleDst = Join-Path $pluginsDir "styles/breeze6.so"
-    if (Test-Path -Path $breezeStyleSrc) {
-        $breezeStyleDir = Join-Path $pluginsDir "styles"
-        if (-not (Test-Path -Path $breezeStyleDir)) {
-            New-Item -ItemType Directory -Path $breezeStyleDir -Force | Out-Null
+    # Copy Breeze style (opt-in via KfPlugins)
+    if ($KfPlugins -contains 'breeze') {
+        $breezeStyleSrc = Join-Path $Kf6InstallDir "lib/plugins/styles/breeze6.so"
+        $breezeStyleDst = Join-Path $pluginsDir "styles/breeze6.so"
+        if (Test-Path -Path $breezeStyleSrc) {
+            $breezeStyleDir = Join-Path $pluginsDir "styles"
+            if (-not (Test-Path -Path $breezeStyleDir)) {
+                New-Item -ItemType Directory -Path $breezeStyleDir -Force | Out-Null
+            }
+            Copy-Item -Path $breezeStyleSrc -Destination $breezeStyleDst -Force
+            Write-Host "  Copied: breeze6.so" -ForegroundColor Gray
         }
-        Copy-Item -Path $breezeStyleSrc -Destination $breezeStyleDst -Force
-        Write-Host "  Copied: breeze6.so" -ForegroundColor Gray
     }
 
     # Copy extra KF6 plugins requested by the caller. KF6 loads these at
     # runtime from <libraryPaths>/kf6/<name>/ (e.g. Sonnet's Loader scans
     # PlugIns/kf6/sonnet/), and PlugIns is in the bundle's library paths.
-    foreach ($kfPluginName in $ExtraKfPlugins) {
+    foreach ($kfPluginName in ($KfPlugins | Where-Object { $_ -eq 'sonnet' })) {
         $kfPluginSrcDir = Join-Path $Kf6InstallDir "lib/plugins/kf6/$kfPluginName"
         if (-not (Test-Path -Path $kfPluginSrcDir)) {
             Write-Warning "Extra KF plugin directory not found: $kfPluginSrcDir"
@@ -1119,7 +1132,7 @@ function Deploy-MacOSAppBundle {
 .DESCRIPTION
     Performs complete Windows deployment:
     1. Runs windeployqt to copy Qt DLLs and plugins
-    2. Copies KIconEnginePlugin, Breeze style, and Sonnet spell check plugins
+    2. Copies the KF6 integration plugins selected via KfPlugins (empty = none)
         3. Resolves KF6 and missing Qt DLL dependencies (PE import table parsing)
         4. Optionally copies the VC++ runtime DLLs actually used (app-local, -CopyVCRuntime)
         5. Copies Breeze color schemes and theme data
@@ -1147,8 +1160,12 @@ function Deploy-WindowsApp {
     param(
         [Parameter(Mandatory)]
         [string]$BinaryPath,
-        [Parameter(Mandatory)]
-        [string]$Kf6InstallDir,
+        # KF6 integration is opt-in: pass Kf6InstallDir together with the
+        # KfPlugins entries to ship. Projects not using KF6 set neither and get
+        # a KF6-free deployment.
+        [string]$Kf6InstallDir = "",
+        [ValidateSet('kiconthemes', 'breeze', 'sonnet')]
+        [string[]]$KfPlugins = @(),
         [Parameter(Mandatory)]
         [string]$BuildDir,
         [Parameter(Mandatory)]
@@ -1163,8 +1180,14 @@ function Deploy-WindowsApp {
     if (-not (Test-Path -Path $BinaryPath)) {
         throw "Binary not found: $BinaryPath. Please build the project first."
     }
-    if (-not (Test-Path -Path $Kf6InstallDir)) {
-        throw "KF6 installation directory not found: $Kf6InstallDir"
+    $kf6DirAvailable = -not [string]::IsNullOrWhiteSpace($Kf6InstallDir) -and
+        (Test-Path -LiteralPath $Kf6InstallDir -PathType Container)
+    if ($KfPlugins.Count -gt 0 -and -not $kf6DirAvailable) {
+        throw "KfPlugins requested but KF6 installation directory not found: '$Kf6InstallDir'"
+    }
+
+    if ($env:GITHUB_ACTIONS -eq "true") {
+        Write-Host "::group::Deploying: $BinaryPath"
     }
 
     $binDir = Split-Path -Path $BinaryPath -Parent
@@ -1179,45 +1202,52 @@ function Deploy-WindowsApp {
     } -Description "windeployqt"
 
     #region Copy KF6 plugins (before dependency resolution so their deps are included)
-    Write-Host "Copying KF6 plugins ..." -ForegroundColor Yellow
+    if ($kf6DirAvailable -and $KfPlugins.Count -gt 0) {
+        Write-Host "Copying KF6 plugins ..." -ForegroundColor Yellow
 
-    $iconEngineSrc = Join-Path $Kf6InstallDir "lib\plugins\kiconthemes6\iconengines\KIconEnginePlugin.dll"
-    if (Test-Path -Path $iconEngineSrc) {
-        $iconEngineDir = Join-Path $binDir "iconengines"
-        if (-not (Test-Path -Path $iconEngineDir)) {
-            New-Item -ItemType Directory -Path $iconEngineDir -Force | Out-Null
+        if ($KfPlugins -contains 'kiconthemes') {
+            $iconEngineSrc = Join-Path $Kf6InstallDir "lib\plugins\kiconthemes6\iconengines\KIconEnginePlugin.dll"
+            if (Test-Path -Path $iconEngineSrc) {
+                $iconEngineDir = Join-Path $binDir "iconengines"
+                if (-not (Test-Path -Path $iconEngineDir)) {
+                    New-Item -ItemType Directory -Path $iconEngineDir -Force | Out-Null
+                }
+                Copy-Item -Path $iconEngineSrc -Destination (Join-Path $iconEngineDir "KIconEnginePlugin.dll") -Force
+                Write-Host "  Copied: KIconEnginePlugin.dll" -ForegroundColor Gray
+            }
         }
-        Copy-Item -Path $iconEngineSrc -Destination (Join-Path $iconEngineDir "KIconEnginePlugin.dll") -Force
-        Write-Host "  Copied: KIconEnginePlugin.dll" -ForegroundColor Gray
-    }
 
-    $breezeSrc = Join-Path $Kf6InstallDir "lib\plugins\styles\breeze6.dll"
-    if (Test-Path -Path $breezeSrc) {
-        $stylesDir = Join-Path $binDir "styles"
-        if (-not (Test-Path -Path $stylesDir)) {
-            New-Item -ItemType Directory -Path $stylesDir -Force | Out-Null
+        if ($KfPlugins -contains 'breeze') {
+            $breezeSrc = Join-Path $Kf6InstallDir "lib\plugins\styles\breeze6.dll"
+            if (Test-Path -Path $breezeSrc) {
+                $stylesDir = Join-Path $binDir "styles"
+                if (-not (Test-Path -Path $stylesDir)) {
+                    New-Item -ItemType Directory -Path $stylesDir -Force | Out-Null
+                }
+                Copy-Item -Path $breezeSrc -Destination (Join-Path $stylesDir "breeze6.dll") -Force
+                Write-Host "  Copied: breeze6.dll" -ForegroundColor Gray
+            }
         }
-        Copy-Item -Path $breezeSrc -Destination (Join-Path $stylesDir "breeze6.dll") -Force
-        Write-Host "  Copied: breeze6.dll" -ForegroundColor Gray
-    }
 
-    # Copy Sonnet spell check backend plugins. Sonnet's Loader scans
-    # <libraryPaths>/kf6/sonnet/ at runtime, and the application
-    # directory (bin) is in the library paths.
-    $sonnetSrcDir = Join-Path $Kf6InstallDir "lib\plugins\kf6\sonnet"
-    if (Test-Path -Path $sonnetSrcDir) {
-        $sonnetDstDir = Join-Path $binDir "kf6\sonnet"
-        if (-not (Test-Path -Path $sonnetDstDir)) {
-            New-Item -ItemType Directory -Path $sonnetDstDir -Force | Out-Null
+        # Copy Sonnet spell check backend plugins. Sonnet's Loader scans
+        # <libraryPaths>/kf6/sonnet/ at runtime, and the application
+        # directory (bin) is in the library paths.
+        if ($KfPlugins -contains 'sonnet') {
+            $sonnetSrcDir = Join-Path $Kf6InstallDir "lib\plugins\kf6\sonnet"
+            if (Test-Path -Path $sonnetSrcDir) {
+                $sonnetDstDir = Join-Path $binDir "kf6\sonnet"
+                if (-not (Test-Path -Path $sonnetDstDir)) {
+                    New-Item -ItemType Directory -Path $sonnetDstDir -Force | Out-Null
+                }
+                Copy-Item -Path "$sonnetSrcDir\*" -Destination $sonnetDstDir -Force
+                Write-Host "  Copied: sonnet spell check plugins" -ForegroundColor Gray
+            }
         }
-        Copy-Item -Path "$sonnetSrcDir\*" -Destination $sonnetDstDir -Force
-        Write-Host "  Copied: sonnet spell check plugins" -ForegroundColor Gray
     }
     #endregion
 
-    #region Resolve KF6 and missing Qt DLL dependencies
+    #region Resolve missing Qt DLL dependencies (and KF6 ones, when shipping KF6)
     Write-Host "Resolving dependencies ..." -ForegroundColor Yellow
-    $kf6BinDir = Join-Path $Kf6InstallDir "bin"
     $qtDirBin = Join-Path $QtDir "bin"
 
     # Collect plugin binaries to scan (they're loaded at runtime, not in dumpbin's dependency chain)
@@ -1226,9 +1256,14 @@ function Deploy-WindowsApp {
                       Select-Object -ExpandProperty FullName
 
     $searchDirs = @{
-        "^KF6"       = $kf6BinDir
-        "^(intl|z)\.dll$" = $kf6BinDir
-        "^Qt6"       = $qtDirBin
+        "^Qt6" = $qtDirBin
+    }
+    if ($kf6DirAvailable) {
+        # Lookup rules only: they fire solely for DLL names that are actually
+        # imported by something already present in the deployment directory.
+        $kf6BinDir = Join-Path $Kf6InstallDir "bin"
+        $searchDirs["^KF6"] = $kf6BinDir
+        $searchDirs["^(intl|z)\.dll$"] = $kf6BinDir
     }
     Copy-PEDependencies -BinaryPath $BinaryPath -DestinationDir $binDir `
         -SearchDirectories $searchDirs -AdditionalBinaries $pluginBinaries
@@ -1246,32 +1281,34 @@ function Deploy-WindowsApp {
     #endregion
 
     #region Copy Breeze data files
-    Write-Host "Copying Breeze data files ..." -ForegroundColor Yellow
-    $kf6DataDir = Join-Path $Kf6InstallDir "bin\data"
+    if ($kf6DirAvailable) {
+        Write-Host "Copying Breeze data files ..." -ForegroundColor Yellow
+        $kf6DataDir = Join-Path $Kf6InstallDir "bin\data"
 
-    # Color schemes
-    $colorSchemesSrc = Join-Path $kf6DataDir "color-schemes"
-    if (Test-Path -Path $colorSchemesSrc) {
-        $colorSchemesDst = Join-Path $binDir "data\color-schemes"
-        if (-not (Test-Path -Path $colorSchemesDst)) {
-            New-Item -ItemType Directory -Path $colorSchemesDst -Force | Out-Null
+        # Color schemes
+        $colorSchemesSrc = Join-Path $kf6DataDir "color-schemes"
+        if (Test-Path -Path $colorSchemesSrc) {
+            $colorSchemesDst = Join-Path $binDir "data\color-schemes"
+            if (-not (Test-Path -Path $colorSchemesDst)) {
+                New-Item -ItemType Directory -Path $colorSchemesDst -Force | Out-Null
+            }
+            Copy-Item -Path "$colorSchemesSrc\*" -Destination $colorSchemesDst -Force
+            Write-Host "  Copied: color-schemes" -ForegroundColor Gray
         }
-        Copy-Item -Path "$colorSchemesSrc\*" -Destination $colorSchemesDst -Force
-        Write-Host "  Copied: color-schemes" -ForegroundColor Gray
-    }
 
-    # KStyle theme
-    $kstyleSrc = Join-Path $kf6DataDir "kstyle"
-    if (Test-Path -Path $kstyleSrc) {
-        $kstyleDst = Join-Path $binDir "data\kstyle"
-        Copy-Item -Path $kstyleSrc -Destination $kstyleDst -Recurse -Force
-        Write-Host "  Copied: kstyle themes" -ForegroundColor Gray
+        # KStyle theme
+        $kstyleSrc = Join-Path $kf6DataDir "kstyle"
+        if (Test-Path -Path $kstyleSrc) {
+            $kstyleDst = Join-Path $binDir "data\kstyle"
+            Copy-Item -Path $kstyleSrc -Destination $kstyleDst -Recurse -Force
+            Write-Host "  Copied: kstyle themes" -ForegroundColor Gray
+        }
     }
     #endregion
 
     #region Copy translations
     Write-Host "Copying translations ..." -ForegroundColor Yellow
-    $kf6LocaleDir = Join-Path $kf6DataDir "locale"
+    $kf6LocaleDir = if ($kf6DirAvailable) { Join-Path (Join-Path $Kf6InstallDir "bin\data") "locale" } else { "" }
     $dstLocaleDir = Join-Path $binDir "data\locale"
     $qtTransDir = Join-Path $QtDir "translations"
     $qtTransDst = Join-Path $binDir "translations"
@@ -1281,6 +1318,10 @@ function Deploy-WindowsApp {
     #endregion
 
     Write-Host "`nDeploy completed successfully" -ForegroundColor Green
+
+    if ($env:GITHUB_ACTIONS -eq "true") {
+        Write-Host "::endgroup::"
+    }
 }
 
 <#

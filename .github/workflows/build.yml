@@ -26,14 +26,21 @@ jobs:
         cache: true
         aqtsource: 'aqtinstall @ git+https://github.com/miurahr/aqtinstall@16db45a70b5905ad596941b223469bc86a56901e'
     - name: Download FFmpeg and kf6redist
-      shell: cmd
+      shell: pwsh
       run: |
-        curl -fsSL -o ffmpeg-shared.7z https://github.com/GyanD/codexffmpeg/releases/download/9.0.1/ffmpeg-9.0.1-full_build-shared.7z
-        7z x ffmpeg-shared.7z -y -o"build_dependencies"
-        echo FFMPEG_ROOT=%CD%\build_dependencies\ffmpeg-9.0.1-full_build-shared >> %GITHUB_ENV%
-        curl -fsSL -o kf6redist.zip https://github.com/BLumia/kf6redist/releases/download/kf6.31.0/win-x64-vs2022-qt6.12.0-kfv6.31.0.zip
-        7z x kf6redist.zip -y -o"build_dependencies\kf6redist"
-        echo KF6REDIST_DIR=%CD%\build_dependencies\kf6redist >> %GITHUB_ENV%
+        $ProgressPreference = 'SilentlyContinue'
+        $deps = Join-Path $PWD "build_dependencies"
+        New-Item -ItemType Directory -Force -Path $deps | Out-Null
+
+        Invoke-WebRequest -Uri "https://github.com/GyanD/codexffmpeg/releases/download/9.0.1/ffmpeg-9.0.1-full_build-shared.7z" -OutFile "ffmpeg-shared.7z"
+        7z x ffmpeg-shared.7z -y "-o$deps"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        Add-Content $env:GITHUB_ENV "FFMPEG_ROOT=$deps\ffmpeg-9.0.1-full_build-shared"
+
+        Invoke-WebRequest -Uri "https://github.com/BLumia/kf6redist/releases/download/kf6.31.0/win-x64-vs2022-qt6.12.0-kfv6.31.0.zip" -OutFile "kf6redist.zip"
+        7z x kf6redist.zip -y "-o$deps\kf6redist"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        Add-Content $env:GITHUB_ENV "KF6REDIST_DIR=$deps\kf6redist"
     - name: Build
       shell: pwsh
       run: |
